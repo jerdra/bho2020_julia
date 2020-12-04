@@ -27,16 +27,25 @@ S(v, w) =  (v' * H(w)) / sqrt(w' * H(w) + 1e-12)
 # registration at a single scale of the spatial pyramid
 register(fixed, moving, config) = begin
 
-  kernel_bounds = Pad(Tuple(maximum([abs(Tuple(ix)[d]) for ix = config.kernel]) for d = 1:length(size(fixed)))...)
-  neighbourhood_bounds = Pad(Tuple(maximum([abs(Tuple(ix)[d]) for ix = config.search_neighbourhood]) for d = 1:length(size(fixed)))...)
+  # Define bounds
+  kernel_bounds = [extrema([ix[d] for ix = config.kernel]) for d = 1:length(size(fixed))]
+  neighbourhood_bounds = [extrema([ix[d] for ix = config.search_neighbourhood])
+						  for d=1:length(size(fixed))]
 
-  fixed_padded = padarray(fixed, kernel_bounds)
-  moving_padded = padarray(moving, neighbourhood_bounds)
+  # Generate padding ranges
+  kernel_ranges = [ix[1]+1 : ix[2]+f for (ix,f) = Iterators.zip(kernel_bounds, size(fixed))]
+  neighbourhood_ranges = [k[1]+s[1]+1 : k[2]+s[2]+f for 
+						  (k,s,f) = Iterators.zip(kernel_bounds, neighbourhood_bounds,
+												size(fixed))]
+
+  # Pad
+  fixed_padded = PaddedView(0, fixed, Tuple(kernel_ranges))
+  moving_padded = PaddedView(0, moving, Tuple(neighbourhood_ranges))
 
   vector_field = zeros(Int8, size(fixed)..., length(size(fixed)))
 
   for fixed_ix = CartesianIndices(fixed)
-    patch = fixed_padded[CartesianIndices([ix + fixed_ix for ix = config.kernel])]
+    patch = [fixed_padded[ix + fixed_ix] for ix = config.kernel]
 
     best_similarity = -Inf
     best_disp = nothing
@@ -44,9 +53,9 @@ register(fixed, moving, config) = begin
     for trial_disp = config.search_neighbourhood
       q = fixed_ix + trial_disp
 
-      trial_patch = moving_padded[CartesianIndices([ix + q for ix = config.kernel])]
+      trial_patch = [moving_padded[ix + q] for ix = config.kernel]
 
-      current_similarity = S(vec(patch), vec(trial_patch))
+      current_similarity = S(vec(patch), vec(trial_patch))  # probably don't need `vec` any more
 
       if current_similarity > best_similarity
         best_similarity = current_similarity
